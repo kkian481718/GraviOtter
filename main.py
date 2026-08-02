@@ -8,6 +8,7 @@ from google import genai
 import re
 import json
 import datetime
+from keep_alive import keep_alive
 
 # 載入環境變數
 load_dotenv()
@@ -476,4 +477,6 @@ async def update_bot(ctx):
         
     subprocess.Popen(["pm2", "restart", "GraviOtter"])
 
+# 啟動保持喚醒的微型伺服器
+keep_alive()
 bot.run(TOKEN)
