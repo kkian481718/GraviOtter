@@ -1,9 +1,18 @@
 #!/bin/bash
-# 啟動時先將遠端最新的程式碼拉下來 (自動同步)
-git pull
+exec > >(tee -a deploy-debug.log) 2>&1
+echo "--- Starting post-start.sh at $(date) ---"
 
+git pull
 pip install -r requirements.txt
 
-# 使用迴圈讓小水獺掛掉或收到 !restart 指令時可以自動重啟
-setsid bash -c 'while true; do echo "Starting Bot..."; python3 -u main.py; echo "Bot crashed or restarted, restarting in 3 seconds..."; sleep 3; done' > bot.log 2>&1 < /dev/null &
+echo "Checking environment..."
+pwd
+ls -la main.py
+python3 --version
 
+echo "Launching background loop..."
+nohup bash -c 'while true; do echo "[$(date)] Starting python3..."; python3 -u main.py; echo "[$(date)] Bot crashed/exited. Restarting in 3 sec..."; sleep 3; done' > bot.log 2>&1 < /dev/null &
+
+echo "Background job launched. Current jobs:"
+jobs -l
+echo "--- post-start.sh finished ---"
