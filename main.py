@@ -300,13 +300,23 @@ async def on_command_error(ctx, error):
 # ==========================================
 # 🛠️ 實體功能指令區
 # ==========================================
+VERSION = "v1.1.0 (Render 搬家紀念版)"
+
+@bot.command(name="v", aliases=["version"])
+async def show_version(ctx):
+    """顯示小水獺的目前版本號"""
+    if not check_user(ctx): return
+    await ctx.send(f"🦦 報告！小水獺目前的版本是：`{VERSION}`")
+
 @bot.command(name="pwd")
 async def pwd(ctx):
+    """查看小水獺目前所在的資料夾路徑"""
     if not check_user(ctx): return
     await ctx.send(f"🦦 目前身在專案目錄：`{current_work_dir}`")
 
 @bot.command(name="cd")
 async def cd(ctx, *, folder: str):
+    """切換小水獺的目前工作目錄"""
     global current_work_dir
     if not check_user(ctx): return
     target_path = os.path.abspath(os.path.join(current_work_dir, folder))
@@ -443,6 +453,7 @@ async def agent_session(ctx, *, prompt: str = ""):
 # ==========================================
 @bot.command(name="sys")
 async def sys_cmd(ctx, *, command: str):
+    """強制小水獺在背景直接執行終端機系統指令"""
     if not check_user(ctx): return
     
     # 改為串流即時輸出
@@ -457,6 +468,7 @@ async def sys_cmd(ctx, *, command: str):
 
 @bot.command(name="restart")
 async def restart_bot(ctx):
+    """幫小水獺洗澡 (重新啟動機器人)"""
     if not check_user(ctx): return
     await ctx.send("🦦 小水獺去洗個澡，馬上回來重新啟動...")
     with open("restart_channel.txt", "w") as f:
@@ -467,6 +479,7 @@ async def restart_bot(ctx):
 
 @bot.command(name="update")
 async def update_bot(ctx):
+    """從 GitHub 讀取最新進度，並且自動重啟更新"""
     if not check_user(ctx): return
     await ctx.send("🦦 正在從 GitHub 學習新技能 (git pull)...")
     import subprocess
