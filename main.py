@@ -497,8 +497,8 @@ async def restart_bot(ctx):
     with open("restart_channel.txt", "w") as f:
         f.write(str(ctx.channel.id))
         
-    import subprocess
-    subprocess.Popen(["pm2", "restart", "GraviOtter"])
+    # 在 Codespaces 我們用 bash 迴圈來保護，退出就會自動重啟
+    sys.exit(0)
 
 @bot.command(name="update")
 async def update_bot(ctx):
@@ -511,7 +511,7 @@ async def update_bot(ctx):
     with open("restart_channel.txt", "w") as f:
         f.write(str(ctx.channel.id))
         
-    subprocess.Popen(["pm2", "restart", "GraviOtter"])
+    sys.exit(0)
 
 # 啟動保持喚醒的微型伺服器
 keep_alive()
