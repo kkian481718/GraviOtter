@@ -8,6 +8,7 @@ from google import genai
 import re
 import json
 import datetime
+import shutil
 from keep_alive import keep_alive
 
 # 載入環境變數
@@ -73,6 +74,18 @@ active_agent_mode = False          # 是否處於 Interactive Agent Session 模�
 agent_session_first_turn = True    # 當前 Agent Session 是否為第一輪 (第一輪用 -p，續集用 -c -p)
 agent_lock = asyncio.Lock()         # 防止並發執行多個 agent 對話
 
+def resolve_agent_cli_command():
+    """解析可用的 Antigravity CLI 指令名稱"""
+    candidates = []
+    env_cmd = os.getenv("AGENT_CLI_COMMAND")
+    if env_cmd:
+        candidates.append(env_cmd)
+    candidates.extend(["ag", "agy"])
+    for cmd in candidates:
+        if shutil.which(cmd):
+            return cmd
+    return None
+
 async def run_agent_turn(channel, prompt: str):
     """執行單輪 Agent 對話，自動處理 -c 繼續模式與 Discord 串流訊息編輯"""
     global current_work_dir, active_agent_mode, agent_session_first_turn, active_processes
@@ -88,7 +101,12 @@ async def run_agent_turn(channel, prompt: str):
         env["PYTHONUNBUFFERED"] = "1"
         env["FORCE_COLOR"] = "1"
 
-        cmd = ["agy", "--dangerously-skip-permissions"]
+        agent_cmd = resolve_agent_cli_command()
+        if not agent_cmd:
+            await channel.send("⚠️ 找不到 Antigravity CLI 指令（預設嘗試 `ag` / `agy`），請先安裝或設定 `AGENT_CLI_COMMAND`。")
+            return
+
+        cmd = [agent_cmd, "--dangerously-skip-permissions"]
         if not agent_session_first_turn:
             cmd.append("-c")
         cmd.extend(["-p", prompt])
@@ -408,8 +426,13 @@ async def run(ctx, *, prompt: str = ""):
     env["FORCE_COLOR"] = "1"
 
     # 改用 create_subprocess_exec 陣列傳遞參數，完美解決遇到換行爆掉的問題
+    agent_cmd = resolve_agent_cli_command()
+    if not agent_cmd:
+        await ctx.send("⚠️ 找不到 Antigravity CLI 指令（預設嘗試 `ag` / `agy`），請先安裝或設定 `AGENT_CLI_COMMAND`。")
+        return
+
     process = await asyncio.create_subprocess_exec(
-        "agy", "--dangerously-skip-permissions", "-p", prompt,
+        agent_cmd, "--dangerously-skip-permissions", "-p", prompt,
         cwd=current_work_dir,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
