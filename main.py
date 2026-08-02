@@ -66,7 +66,7 @@ async def record_token_usage(tokens):
     return data
 
 # 全域狀態管理
-current_work_dir = os.path.expanduser("/workspaces")
+current_work_dir = os.path.abspath(os.path.dirname(__file__))
 active_processes = {}  # 記錄正在跑的指令 (包含 run / sys / agent)，方便煞車
 tunnel_process = None
 active_agent_mode = False          # 是否處於 Interactive Agent Session 模式
