@@ -35,7 +35,8 @@ SYSTEM_INSTRUCTION = (
     "3. DO NOT list available commands or directory files UNLESS the user explicitly asks for them.\n"
     "4. For casual chat, reply naturally without unprompted self-introductions or feature lists.\n"
     "5. CRITICAL: You CANNOT execute system or git commands directly. If the user gives a URL or asks for an action without prefixing with !run or !sys, politely remind them to use !sys git clone ... or !run.\n"
-    "6. If the user provides an action instead of chat while in an active agent session, remind them the agent will see it automatically."
+    "6. If the user provides an action instead of chat while in an active agent session, remind them the agent will see it automatically.\n"
+    "7. CRITICAL: 你的主人名字叫 Miffy，請稱呼對方為 Miffy，不要再叫「主人」，那樣太油了！"
 )
 
 # 3. 用量管理
@@ -122,6 +123,11 @@ async def stream_to_discord(process_stdout, destination, prefix=""):
             await msg.edit(content=f"{prefix}\n```text\n{current_msg_content}\n```\n✅ **輸出完畢**")
         except Exception:
             pass
+    else:
+        try:
+            await msg.edit(content=f"{prefix}\n```text\n(無輸出內容，進程已默默結束)\n```")
+        except Exception:
+            pass
             
     return current_msg_content
 
@@ -129,6 +135,19 @@ async def stream_to_discord(process_stdout, destination, prefix=""):
 async def on_ready():
     print(f"🦦 GraviOtter 已上線！(Logged in as {bot.user})")
     print(f"目前工作目錄: {current_work_dir}")
+    
+    # 檢查是否有重啟紀錄，有的話回報給指定頻道
+    restart_file = "restart_channel.txt"
+    if os.path.exists(restart_file):
+        try:
+            with open(restart_file, "r") as f:
+                channel_id = int(f.read().strip())
+            channel = bot.get_channel(channel_id)
+            if channel:
+                await channel.send("🦦 ✨ 報告 Miffy，我洗完澡帶著新技能回來啦！(重新啟動完成，一切正常運作中)")
+            os.remove(restart_file)
+        except Exception as e:
+            print(f"無法發送重啟通知: {e}")
 
 # ==========================================
 # 🤖 核心對話區：處理一般聊天與指令分流
@@ -215,7 +234,7 @@ async def on_message(message):
                     with open(USAGE_FILE, "w", encoding="utf-8") as f:
                         json.dump(usage_data, f)
                     try:
-                        await message.author.send(f"🦦 主人注意！今天的 API 額度快滿啦 (已達 {usage_data['tokens']} Tokens)，我的體力快被榨乾了...")
+                        await message.author.send(f"🦦 Miffy 注意！今天的 API 額度快滿啦 (已達 {usage_data['tokens']} Tokens)，我的體力快被榨乾了...")
                     except Exception: pass
             
             await message.reply(reply_text)
@@ -224,6 +243,11 @@ async def on_message(message):
             import traceback
             tb = traceback.format_exc()
             await message.reply(f"🦦 嗚嗚，小水獺的腦袋卡住了... (錯誤: {e})\n{tb}")
+
+@bot.event
+async def on_command_error(ctx, error):
+    """捕捉並顯示指令錯誤，避免默默失敗"""
+    await ctx.send(f"⚠️ 指令錯誤: {error}")
 
 # ==========================================
 # 🛠️ 實體功能指令區
@@ -307,7 +331,7 @@ async def stop(ctx):
         stopped_anything = True
             
     if not stopped_anything:
-        await ctx.send("🦦 報告主人，目前沒有正在執行的任務喔！")
+        await ctx.send("🦦 報告 Miffy，目前沒有正在執行的任務喔！")
 
 @bot.command(name="run")
 async def run(ctx, *, prompt: str = ""):
@@ -319,12 +343,18 @@ async def run(ctx, *, prompt: str = ""):
         await ctx.send("⚠️ 請告訴我要讓 Antigravity 做什麼！")
         return
 
+    # 傳遞環境變數強制 Python 不使用緩衝 (避免卡在 "等待輸出...")
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    env["FORCE_COLOR"] = "1"
+
     # 改用 create_subprocess_exec 陣列傳遞參數，完美解決遇到換行爆掉的問題
     process = await asyncio.create_subprocess_exec(
         "agy", "--dangerously-skip-permissions", "-p", prompt,
         cwd=current_work_dir,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT
+        stderr=asyncio.subprocess.STDOUT,
+        env=env
     )
     
     active_processes[process.pid] = process
@@ -337,21 +367,27 @@ async def run(ctx, *, prompt: str = ""):
         del active_processes[process.pid]
 
 @bot.command(name="agent")
-async def agent_session(ctx):
+async def agent_session(ctx, *, prompt: str = ""):
     """啟動多輪互動 Session"""
     global current_work_dir, active_agent_session
     if not check_user(ctx): return
 
     if active_agent_session and active_agent_session.returncode is None:
-        await ctx.send("🦦 主人，你已經有一個正在運行的 Agent Session 了哦！")
+        await ctx.send("🦦 Miffy，你已經有一個正在運行的 Agent Session 了哦！")
         return
+
+    # 強制禁用緩衝，讓 Antigravity 的打字輸出能即時吐給 Discord
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    env["FORCE_COLOR"] = "1"
 
     active_agent_session = await asyncio.create_subprocess_exec(
         "agy", "--dangerously-skip-permissions",
         cwd=current_work_dir,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT
+        stderr=asyncio.subprocess.STDOUT,
+        env=env
     )
     
     await ctx.send(
@@ -361,6 +397,17 @@ async def agent_session(ctx):
     )
     
     bot.loop.create_task(stream_to_discord(active_agent_session.stdout, ctx.channel, prefix="🧠 **Agent:**"))
+    
+    # 稍微等子程序啟動
+    await asyncio.sleep(0.5)
+    
+    # 如果一開始就有附帶訊息，直接送進去
+    if prompt.strip():
+        try:
+            active_agent_session.stdin.write(f"{prompt}\n".encode('utf-8'))
+            await active_agent_session.stdin.drain()
+        except Exception:
+            pass
 
 # ==========================================
 # ⚙️ 系統自我管理指令區
@@ -383,6 +430,9 @@ async def sys_cmd(ctx, *, command: str):
 async def restart_bot(ctx):
     if not check_user(ctx): return
     await ctx.send("🦦 小水獺去洗個澡，馬上回來重新啟動...")
+    with open("restart_channel.txt", "w") as f:
+        f.write(str(ctx.channel.id))
+        
     import subprocess
     subprocess.Popen(["pm2", "restart", "GraviOtter"])
 
@@ -393,6 +443,9 @@ async def update_bot(ctx):
     import subprocess
     subprocess.run(["git", "pull"], cwd=os.path.dirname(os.path.abspath(__file__)))
     await ctx.send("✅ 學習完成！重新啟動中...")
+    with open("restart_channel.txt", "w") as f:
+        f.write(str(ctx.channel.id))
+        
     subprocess.Popen(["pm2", "restart", "GraviOtter"])
 
 bot.run(TOKEN)
