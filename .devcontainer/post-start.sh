@@ -1,4 +1,7 @@
 #!/bin/bash
+# 啟動時先將遠端最新的程式碼拉下來 (自動同步)
+git pull
+
 pip install -r requirements.txt
 
 # 使用迴圈讓小水獺掛掉或收到 !restart 指令時可以自動重啟
