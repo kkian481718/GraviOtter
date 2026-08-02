@@ -319,13 +319,20 @@ async def on_command_error(ctx, error):
 # ==========================================
 # 🛠️ 實體功能指令區
 # ==========================================
-VERSION = "v1.1.0 (Render 搬家紀念版)"
+def get_bot_version():
+    import subprocess
+    try:
+        commit_hash = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+        commit_date = subprocess.check_output(["git", "log", "-1", "--format=%cd", "--date=short"], text=True).strip()
+        return f"Build {commit_date} (Hash: {commit_hash})"
+    except Exception:
+        return "未知 (無 Git 紀錄)"
 
 @bot.command(name="v", aliases=["version"])
 async def show_version(ctx):
     """顯示小水獺的目前版本號"""
     if not check_user(ctx): return
-    await ctx.send(f"🦦 報告！小水獺目前的版本是：`{VERSION}`")
+    await ctx.send(f"🦦 報告！小水獺目前的版本是：`{get_bot_version()}`")
 
 @bot.command(name="pwd")
 async def pwd(ctx):
