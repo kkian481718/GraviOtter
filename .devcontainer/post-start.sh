@@ -1,18 +1,14 @@
 #!/bin/bash
-exec > >(tee -a deploy-debug.log) 2>&1
-echo "--- Starting post-start.sh at $(date) ---"
+echo "--- Starting post-start.sh at $(date) ---" > deploy-debug.log
 
-git pull
-pip install -r requirements.txt
+# 啟動時先將遠端最新的程式碼拉下來
+git pull >> deploy-debug.log 2>&1
 
-echo "Checking environment..."
-pwd
-ls -la main.py
-python3 --version
+# 使用 PM2 接管小水獺 (完全無視Codespace清除背景程序的限制)
+echo "Starting Bot via PM2..." >> deploy-debug.log
+pm2 start main.py --interpreter python3 --name graviotter >> deploy-debug.log 2>&1
 
-echo "Launching background loop..."
-nohup bash -c 'while true; do echo "[$(date)] Starting python3..."; python3 -u main.py; echo "[$(date)] Bot crashed/exited. Restarting in 3 sec..."; sleep 3; done' > bot.log 2>&1 < /dev/null &
+echo "Current background services:" >> deploy-debug.log
+pm2 status >> deploy-debug.log 2>&1
 
-echo "Background job launched. Current jobs:"
-jobs -l
-echo "--- post-start.sh finished ---"
+echo "--- post-start.sh finished ---" >> deploy-debug.log
