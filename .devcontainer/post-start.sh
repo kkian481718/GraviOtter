@@ -1,14 +1,24 @@
 #!/bin/bash
-echo "--- Starting post-start.sh at $(date) ---" > deploy-debug.log
+echo "--- Starting post-start.sh at $(date) ---" >> deploy-debug.log
 
-# 啟動時先將遠端最新的程式碼拉下來
+# 拉下最新程式碼
 git pull >> deploy-debug.log 2>&1
 
-# 使用 PM2 接管小水獺 (完全無視Codespace清除背景程序的限制)
-echo "Starting Bot via PM2..." >> deploy-debug.log
-pm2 start main.py --interpreter python3 --name graviotter >> deploy-debug.log 2>&1
+echo "Starting bot with nohup..." >> deploy-debug.log
 
-echo "Current background services:" >> deploy-debug.log
-pm2 status >> deploy-debug.log 2>&1
+PIDFILE=".graviotter.pid"
+
+if [ -f "$PIDFILE" ]; then
+	OLDPID=$(cat "$PIDFILE")
+	if ps -p $OLDPID >/dev/null 2>&1; then
+		echo "Killing old PID $OLDPID" >> deploy-debug.log 2>&1
+		kill $OLDPID >> deploy-debug.log 2>&1 || true
+	fi
+	rm -f "$PIDFILE"
+fi
+
+nohup python3 main.py >> deploy-debug.log 2>&1 &
+echo $! > .graviotter.pid
+echo "Started main.py with PID $(cat .graviotter.pid)" >> deploy-debug.log
 
 echo "--- post-start.sh finished ---" >> deploy-debug.log
