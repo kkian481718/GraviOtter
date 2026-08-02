@@ -64,9 +64,51 @@ def record_token_usage(tokens):
 
 # 全域狀態管理
 current_work_dir = os.path.expanduser("/workspaces")
-active_processes = {}  # 記錄正在跑的指令 (包含 run / sys)，方便煞車
+active_processes = {}  # 記錄正在跑的指令 (包含 run / sys / agent)，方便煞車
 tunnel_process = None
-active_agent_session = None  # 紀錄跑在背景的長駐 agent Session
+active_agent_mode = False          # 是否處於 Interactive Agent Session 模式
+agent_session_first_turn = True    # 當前 Agent Session 是否為第一輪 (第一輪用 -p，續集用 -c -p)
+agent_lock = asyncio.Lock()         # 防止並發執行多個 agent 對話
+
+async def run_agent_turn(channel, prompt: str):
+    """執行單輪 Agent 對話，自動處理 -c 繼續模式與 Discord 串流訊息編輯"""
+    global current_work_dir, active_agent_mode, agent_session_first_turn, active_processes
+    
+    if not active_agent_mode:
+        return
+        
+    async with agent_lock:
+        if not active_agent_mode:
+            return
+            
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        env["FORCE_COLOR"] = "1"
+
+        cmd = ["agy", "--dangerously-skip-permissions"]
+        if not agent_session_first_turn:
+            cmd.append("-c")
+        cmd.extend(["-p", prompt])
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=current_work_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=env
+            )
+            
+            active_processes[process.pid] = process
+            agent_session_first_turn = False
+            
+            await stream_to_discord(process.stdout, channel, prefix="🧠 **Agent:**")
+            await process.wait()
+        except Exception as e:
+            await channel.send(f"⚠️ Agent 執行發生錯誤: {e}")
+        finally:
+            if 'process' in locals() and process.pid in active_processes:
+                del active_processes[process.pid]
 
 def check_user(ctx_or_message):
     """檢查是否為授權的主人"""
@@ -154,7 +196,7 @@ async def on_ready():
 # ==========================================
 @bot.event
 async def on_message(message):
-    global active_agent_session
+    global active_agent_mode
     
     if message.author == bot.user:
         return
@@ -167,14 +209,10 @@ async def on_message(message):
         await bot.process_commands(message)
         return
 
-    # 情況 B：若有長駐 Agent，直接丟進 stdin (過濾掉不需要對話的狀態)
-    if active_agent_session and active_agent_session.returncode is None:
-        try:
-            await message.add_reaction("🧠")
-            active_agent_session.stdin.write(f"{message.content}\n".encode('utf-8'))
-            await active_agent_session.stdin.drain()
-        except Exception as e:
-            await message.reply(f"⚠️ 傳遞給 Agent 失敗: {e}")
+    # 情況 B：若開啟 Agent Session 模式，轉送給 Antigravity CLI
+    if active_agent_mode:
+        await message.add_reaction("🧠")
+        bot.loop.create_task(run_agent_turn(message.channel, message.content))
         return
 
     # 情況 C：無 Agent 時，與自然對話模型 (Flash) 互動
@@ -308,7 +346,7 @@ async def tunnel(ctx, port: int = 3000):
 @bot.command(name="stop")
 async def stop(ctx):
     """緊急煞車按鈕，兼任關閉 Session"""
-    global tunnel_process, active_processes, active_agent_session
+    global tunnel_process, active_processes, active_agent_mode
     if not check_user(ctx): return
     
     stopped_anything = False
@@ -320,13 +358,14 @@ async def stop(ctx):
         
     for pid, proc in list(active_processes.items()):
         if proc.returncode is None:
-            proc.terminate()
-            await ctx.send("🛑 已強制停止單次任務。")
+            try:
+                proc.terminate()
+            except Exception: pass
             stopped_anything = True
+    active_processes.clear()
             
-    if active_agent_session and active_agent_session.returncode is None:
-        active_agent_session.terminate()
-        active_agent_session = None
+    if active_agent_mode:
+        active_agent_mode = False
         await ctx.send("🛑 已關閉長期 Agent Session (對話轉回 Flash)。")
         stopped_anything = True
             
@@ -369,45 +408,25 @@ async def run(ctx, *, prompt: str = ""):
 @bot.command(name="agent")
 async def agent_session(ctx, *, prompt: str = ""):
     """啟動多輪互動 Session"""
-    global current_work_dir, active_agent_session
+    global active_agent_mode, agent_session_first_turn
     if not check_user(ctx): return
 
-    if active_agent_session and active_agent_session.returncode is None:
-        await ctx.send("🦦 Miffy，你已經有一個正在運行的 Agent Session 了哦！")
+    if active_agent_mode:
+        await ctx.send("🦦 Miffy，你已經有一個正在運行的 Agent Session 了哦！(要退出請輸入 `!stop`) ")
         return
 
-    # 強制禁用緩衝，讓 Antigravity 的打字輸出能即時吐給 Discord
-    env = os.environ.copy()
-    env["PYTHONUNBUFFERED"] = "1"
-    env["FORCE_COLOR"] = "1"
+    active_agent_mode = True
+    agent_session_first_turn = True
 
-    active_agent_session = await asyncio.create_subprocess_exec(
-        "agy", "--dangerously-skip-permissions",
-        cwd=current_work_dir,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-        env=env
-    )
-    
     await ctx.send(
         "🦦 🧠 **[Interactive Agent Session 已啟動]** \n"
         "接下來您的任何聊天文字都會直接轉送給大腦（包含它問您的問題）！\n"
         "*(要退出請輸入 `!stop`)*"
     )
     
-    bot.loop.create_task(stream_to_discord(active_agent_session.stdout, ctx.channel, prefix="🧠 **Agent:**"))
-    
-    # 稍微等子程序啟動
-    await asyncio.sleep(0.5)
-    
-    # 如果一開始就有附帶訊息，直接送進去
+    # 如果一開始就有附帶訊息，直接執行第一輪
     if prompt.strip():
-        try:
-            active_agent_session.stdin.write(f"{prompt}\n".encode('utf-8'))
-            await active_agent_session.stdin.drain()
-        except Exception:
-            pass
+        bot.loop.create_task(run_agent_turn(ctx.channel, prompt))
 
 # ==========================================
 # ⚙️ 系統自我管理指令區
