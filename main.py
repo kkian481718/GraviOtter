@@ -9,7 +9,6 @@ import re
 import json
 import datetime
 import shutil
-from keep_alive import keep_alive
 
 # 載入環境變數
 load_dotenv()
@@ -212,6 +211,8 @@ async def on_ready():
             with open(restart_file, "r") as f:
                 channel_id = int(f.read().strip())
             channel = bot.get_channel(channel_id)
+            if not channel:
+                channel = await bot.fetch_channel(channel_id)
             if channel:
                 await channel.send("🦦 ✨ 報告 Miffy，我洗完澡帶著新技能回來啦！(重新啟動完成，一切正常運作中)")
             os.remove(restart_file)
@@ -497,8 +498,8 @@ async def restart_bot(ctx):
     with open("restart_channel.txt", "w") as f:
         f.write(str(ctx.channel.id))
         
-    # 在 Codespaces 我們用 bash 迴圈來保護，退出就會自動重啟
-    sys.exit(0)
+    # 更優雅的關閉方式，確保非同步連線正確中斷，再由 bash 迴圈接手重啟
+    await bot.close()
 
 @bot.command(name="update")
 async def update_bot(ctx):
@@ -511,8 +512,6 @@ async def update_bot(ctx):
     with open("restart_channel.txt", "w") as f:
         f.write(str(ctx.channel.id))
         
-    sys.exit(0)
+    await bot.close()
 
-# 啟動保持喚醒的微型伺服器
-keep_alive()
 bot.run(TOKEN)
