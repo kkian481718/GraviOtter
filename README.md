@@ -7,14 +7,12 @@ My assistant for on-phone coding & remote agent control.
 主要目的是作為橋樑，讓使用者能透過 Discord (dc) 遠端遙控 **Antigravity AI Agent**，從手機或任何裝置免費且方便地使用尖端模型。
 
 ## System Setup (系統架構)
-- **環境介面**: GitHub Codespaces
+- **環境介面**: GitHub Codespaces (支援多種 VPS 部署)
 - **程序管理**: PM2 (確保 Bot 穩定在背景運行)
 - **互動介面**: Discord Bot (監聽訊息、發送對話)
-- **核心大腦**: Antigravity (負責處理複雜的請求與回應)
+- **核心大腦**: Antigravity / Gemini API
 
-## Future Feature: API Quota Proactive Warning (API 用量主動提醒機制)
-**給未來的 Agent (To Future Agents):**
-未來在擴充此專案時，需要實作一個追蹤 API 用量的功能：
-1. **用量追蹤**: 在每次呼叫模型 API 後，擷取並記錄已消耗的 Tokens 數。
-2. **主動推播**: 當累計用量快達到上限（如 80% 或 90%）時，透過 Discord Bot API 主動發送私訊 (DM) 給使用者。
-3. **角色設定**: 請以「小水獺 (GraviOtter)」的口吻發送警告。例如：「主人，我的體力快被榨乾啦... 今天的 API 額度快滿了，請注意喔 🦦」
+---
+
+> ** 給未來 AI Agent 的開發提示 (To Future AI Agents)**
+> 若需要了解本專案的底層技術限制、環境變數規範與 Discord API 的應對方式，請直接讀取本專案內的 `.agent/rules/project_context.md`，該處存有最新的專案上下文認知。
