@@ -34,7 +34,7 @@ SYSTEM_INSTRUCTION = (
     "2. Keep responses brief and concise.\n"
     "3. DO NOT list available commands or directory files UNLESS the user explicitly asks for them.\n"
     "4. For casual chat, reply naturally without unprompted self-introductions or feature lists.\n"
-    "5. CRITICAL: You CANNOT execute system or git commands directly. If the user gives a URL or asks for an action without prefixing with !run or !sys, politely remind them to use !sys git clone ... or !run.\n"
+    "5. CRITICAL: 你的主要工作是日常對話。如果主人提出需要看程式碼、修改程式碼、除錯 (debug)、建立檔案等任務，請直接拒絕猜測，並用這句話提醒主人：『Miffy，這需要出動小水獺的超級大腦！請輸入 `!agent` 來喚醒我的工作模式哦！』\n"
     "6. If the user provides an action instead of chat while in an active agent session, remind them the agent will see it automatically.\n"
     "7. CRITICAL: 你的主人名字叫 Miffy，請稱呼對方為 Miffy，不要再叫「主人」，那樣太油了！"
 )
@@ -42,24 +42,26 @@ SYSTEM_INSTRUCTION = (
 # 3. 用量管理
 USAGE_FILE = "bot_usage.json"
 DAILY_TOKEN_LIMIT = 1000000  # 100萬 Tokens 警報門檻
+usage_lock = asyncio.Lock()  # 新增 Lock 防止寫入衝突
 
-def record_token_usage(tokens):
+async def record_token_usage(tokens):
     today_str = datetime.date.today().isoformat()
     data = {}
-    if os.path.exists(USAGE_FILE):
-        try:
-            with open(USAGE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            pass
+    async with usage_lock:
+        if os.path.exists(USAGE_FILE):
+            try:
+                with open(USAGE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                pass
+                
+        # Reset for a new day
+        if "date" not in data or data.get("date") != today_str:
+            data = {"date": today_str, "tokens": 0, "warned": False}
             
-    # Reset for a new day
-    if "date" not in data or data.get("date") != today_str:
-        data = {"date": today_str, "tokens": 0, "warned": False}
-        
-    data["tokens"] += tokens
-    with open(USAGE_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f)
+        data["tokens"] += tokens
+        with open(USAGE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f)
     return data
 
 # 全域狀態管理
@@ -120,10 +122,11 @@ def check_user(ctx_or_message):
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 async def stream_to_discord(process_stdout, destination, prefix=""):
-    """每隔一小段時間將 stdout 同步編輯至一條 Discord 訊息"""
+    """每隔一段時間將 stdout 同步編輯至 Discord 訊息，並加入防 Rate Limit 機制。"""
     msg = await destination.send(f"{prefix}\n```text\n(等待輸出...)\n```")
     current_msg_content = ""
     last_edit_time = asyncio.get_event_loop().time()
+    edit_interval = 1.5  # 初始更新間隔
     
     while True:
         try:
@@ -148,15 +151,20 @@ async def stream_to_discord(process_stdout, destination, prefix=""):
             msg = await destination.send(f"```text\n(接續輸出...)\n```")
             current_msg_content = ""
             last_edit_time = asyncio.get_event_loop().time()
+            edit_interval = 1.5  # 換新訊息後重置間隔
             continue
             
         now = asyncio.get_event_loop().time()
-        # 每 1.5 秒更新一次畫面
-        if now - last_edit_time > 1.5 and current_msg_content:
+        # 每隔 edit_interval 秒更新一次畫面
+        if now - last_edit_time > edit_interval and current_msg_content:
             try:
                 await msg.edit(content=f"{prefix}\n```text\n{current_msg_content}\n```")
                 last_edit_time = now
-            except Exception:
+                if edit_interval < 3.5:
+                    edit_interval += 0.5  # 漸進拉長間距，避免 Edit 太頻繁觸發 429
+            except Exception as e:
+                if "429" in str(e):
+                    edit_interval = 4.0  # 碰壁了直接大幅降速
                 pass
 
     # 最後結算一次確保畫面同步
@@ -218,10 +226,10 @@ async def on_message(message):
     # 情況 C：無 Agent 時，與自然對話模型 (Flash) 互動
     async with message.channel.typing():
         try:
-            # 讀取目錄
+            # 讀取目錄 (優化為非阻塞讀取)
             try:
-                files = os.listdir(current_work_dir)[:50]
-                files_list = ", ".join(files) if files else "目錄是空的"
+                files = await asyncio.to_thread(os.listdir, current_work_dir)
+                files_list = ", ".join(files[:50]) if files else "目錄是空的"
             except Exception:
                 files_list = "無法讀取目錄。"
 
@@ -261,16 +269,17 @@ async def on_message(message):
             if len(reply_text) > 2000:
                 reply_text = reply_text[:1990] + "...(字數過長)"
                 
-            # Token 追蹤
+            # Token 追蹤 (加上 await 並以 Lock 保護 Json 修改)
             if hasattr(response, "usage_metadata") and response.usage_metadata:
                 total_tokens = response.usage_metadata.total_token_count
-                usage_data = record_token_usage(total_tokens)
+                usage_data = await record_token_usage(total_tokens)
                 
                 # 警告推播 (發送到 DM)
                 if usage_data["tokens"] >= DAILY_TOKEN_LIMIT and not usage_data.get("warned"):
                     usage_data["warned"] = True
-                    with open(USAGE_FILE, "w", encoding="utf-8") as f:
-                        json.dump(usage_data, f)
+                    async with usage_lock:
+                        with open(USAGE_FILE, "w", encoding="utf-8") as f:
+                            json.dump(usage_data, f)
                     try:
                         await message.author.send(f"🦦 Miffy 注意！今天的 API 額度快滿啦 (已達 {usage_data['tokens']} Tokens)，我的體力快被榨乾了...")
                     except Exception: pass
