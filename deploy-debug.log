@@ -1,7 +1,0 @@
---- Starting post-start.sh at Sun Aug  2 15:35:44 UTC 2026 ---
-Already up to date.
-Starting Bot via PM2...
-.devcontainer/post-start.sh: line 9: pm2: command not found
-Current background services:
-.devcontainer/post-start.sh: line 12: pm2: command not found
---- post-start.sh finished ---
