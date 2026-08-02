@@ -9,6 +9,7 @@ import re
 import json
 import datetime
 import shutil
+import shlex
 
 # 載入環境變數
 load_dotenv()
@@ -72,17 +73,27 @@ tunnel_process = None
 active_agent_mode = False          # 是否處於 Interactive Agent Session 模式
 agent_session_first_turn = True    # 當前 Agent Session 是否為第一輪 (第一輪用 -p，續集用 -c -p)
 agent_lock = asyncio.Lock()         # 防止並發執行多個 agent 對話
+AGENT_CLI_NOT_FOUND_MSG = "⚠️ 找不到 Antigravity CLI 指令（預設嘗試 `ag` / `agy`），請先安裝或設定 `AGENT_CLI_COMMAND`。"
 
 def resolve_agent_cli_command():
-    """解析可用的 Antigravity CLI 指令名稱"""
+    """解析可用的 Antigravity CLI 指令與參數陣列"""
     candidates = []
-    env_cmd = os.getenv("AGENT_CLI_COMMAND")
+    env_cmd = (os.getenv("AGENT_CLI_COMMAND") or "").strip()
     if env_cmd:
-        candidates.append(env_cmd)
-    candidates.extend(["ag", "agy"])
-    for cmd in candidates:
-        if shutil.which(cmd):
-            return cmd
+        try:
+            parsed = shlex.split(env_cmd)
+            if parsed:
+                candidates.append(parsed)
+        except ValueError:
+            # 解析失敗時忽略，改走預設候選指令
+            pass
+
+    candidates.extend([["ag"], ["agy"]])
+
+    for cmd_parts in candidates:
+        executable = shutil.which(cmd_parts[0])
+        if executable:
+            return [executable, *cmd_parts[1:]]
     return None
 
 async def run_agent_turn(channel, prompt: str):
@@ -100,12 +111,14 @@ async def run_agent_turn(channel, prompt: str):
         env["PYTHONUNBUFFERED"] = "1"
         env["FORCE_COLOR"] = "1"
 
-        agent_cmd = resolve_agent_cli_command()
-        if not agent_cmd:
-            await channel.send("⚠️ 找不到 Antigravity CLI 指令（預設嘗試 `ag` / `agy`），請先安裝或設定 `AGENT_CLI_COMMAND`。")
+        agent_cmd_parts = resolve_agent_cli_command()
+        if not agent_cmd_parts:
+            active_agent_mode = False
+            agent_session_first_turn = True
+            await channel.send(f"{AGENT_CLI_NOT_FOUND_MSG}\n已自動退出 Interactive Agent Session。")
             return
 
-        cmd = [agent_cmd, "--dangerously-skip-permissions"]
+        cmd = [*agent_cmd_parts, "--dangerously-skip-permissions"]
         if not agent_session_first_turn:
             cmd.append("-c")
         cmd.extend(["-p", prompt])
@@ -434,13 +447,13 @@ async def run(ctx, *, prompt: str = ""):
     env["FORCE_COLOR"] = "1"
 
     # 改用 create_subprocess_exec 陣列傳遞參數，完美解決遇到換行爆掉的問題
-    agent_cmd = resolve_agent_cli_command()
-    if not agent_cmd:
-        await ctx.send("⚠️ 找不到 Antigravity CLI 指令（預設嘗試 `ag` / `agy`），請先安裝或設定 `AGENT_CLI_COMMAND`。")
+    agent_cmd_parts = resolve_agent_cli_command()
+    if not agent_cmd_parts:
+        await ctx.send(AGENT_CLI_NOT_FOUND_MSG)
         return
 
     process = await asyncio.create_subprocess_exec(
-        agent_cmd, "--dangerously-skip-permissions", "-p", prompt,
+        *agent_cmd_parts, "--dangerously-skip-permissions", "-p", prompt,
         cwd=current_work_dir,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
@@ -464,6 +477,11 @@ async def agent_session(ctx, *, prompt: str = ""):
 
     if active_agent_mode:
         await ctx.send("🦦 Miffy，你已經有一個正在運行的 Agent Session 了哦！(要退出請輸入 `!stop`) ")
+        return
+
+    agent_cmd_parts = resolve_agent_cli_command()
+    if not agent_cmd_parts:
+        await ctx.send(AGENT_CLI_NOT_FOUND_MSG)
         return
 
     active_agent_mode = True
