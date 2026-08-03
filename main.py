@@ -88,7 +88,15 @@ def resolve_agent_cli_command():
             # 解析失敗時忽略，改走預設候選指令
             pass
 
-    candidates.extend([["ag"], ["agy"]])
+    # 加入常見預設指令
+    candidates.extend([["ag"], ["agy"], ["antigravity"]])
+    
+    # 針對 Windows 特殊處理：如果在 VS Code Extension/Antigravity 中執行，預設可能安裝在 LocalAppData
+    if sys.platform == "win32":
+        local_app_data = os.getenv("LOCALAPPDATA")
+        if local_app_data:
+            default_path = os.path.join(local_app_data, "Programs", "Antigravity", "bin", "antigravity.cmd")
+            candidates.append([default_path])
 
     for cmd_parts in candidates:
         executable = shutil.which(cmd_parts[0])
