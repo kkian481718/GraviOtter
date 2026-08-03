@@ -1,8 +1,8 @@
 {
     "name": "GraviOtter - AI Brain",
     "image": "mcr.microsoft.com/devcontainers/python:3.11",
-    "postCreateCommand": "bash .devcontainer/post-create.sh",
-    "postStartCommand": "bash .devcontainer/post-start.sh",
+    "postCreateCommand": "python3 main.py",
+    "postStartCommand": "python3 main.py",
     "customizations": {
         "vscode": {
             "extensions": [
